@@ -2,6 +2,8 @@
 *.o
 *.a
 *.so
+*.lock
+env.cmd
 
 # Folders
 _obj
