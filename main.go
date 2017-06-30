@@ -38,18 +38,20 @@ package main
 //
 
 import (
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
+	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
 )
 
 var (
 	// Hard coded values for instance creation/update
-	resourceGroupName                = "postgresql_from_go"
+	resourceGroupName                = "postgresql_from_goy"
 	location                         = "westus"
 	namespace                        = "Microsoft.DBforPostgreSQL"
 	resourceType                     = "servers"
@@ -59,15 +61,15 @@ var (
 	storageMB                        = 307200
 	sslEnforcement                   = "Disabled"
 	tier                             = "Basic"
-	capacity                   int32 = 50
+	capacity                   int32 = 100
 
 	// PostgreSQL instance name.  Must be globally unique
-	serverName = "azcat-db6"
+	serverName = "azcat-db7"
 
-	// client to create resource group
+	// client to create resource groups
 	groupsClient resources.GroupsClient
-	// client to create generic resource (in this case the postgresql instance)
-	resourcesClient resources.Client
+	// client to create resources
+	resourcesClient resources.GroupClient
 )
 
 // Create the clients
@@ -76,41 +78,53 @@ func init() {
 	subscriptionID := getEnvVarOrExit("AZURE_SUBSCRIPTION_ID")
 	tenantID := getEnvVarOrExit("AZURE_TENANT_ID")
 
-	oauthConfig, err := azure.PublicCloud.OAuthConfigForTenant(tenantID)
-	onErrorFail(err, "OAuthConfigForTenant failed")
+	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
+	onErrorFail(err, "Error getting OAuth configuration")
 
 	clientID := getEnvVarOrExit("AZURE_CLIENT_ID")
 	clientSecret := getEnvVarOrExit("AZURE_CLIENT_SECRET")
-	spToken, err := azure.NewServicePrincipalToken(*oauthConfig, clientID, clientSecret, azure.PublicCloud.ResourceManagerEndpoint)
+	spToken, err := adal.NewServicePrincipalToken(*oauthConfig, clientID, clientSecret, azure.PublicCloud.ResourceManagerEndpoint)
+	authorizer := autorest.NewBearerAuthorizer(spToken)
 	onErrorFail(err, "NewServicePrincipalToken failed")
 
-	createClients(subscriptionID, spToken)
+	createClients(subscriptionID, authorizer)
 }
 
 func main() {
-	// create the database instance
-	createResourceGroup()
-	createServer()
-	fmt.Print("Server created. Press enter to update Server")
 	var input string
-	fmt.Scanln(&input)
+	// ensure the resource group is created
+	fmt.Println("Creating resource group:" + resourceGroupName)
+	rg := createResourceGroup()
+	rgAsJSON, merr := toJSON(rg)
+	if merr == nil {
+		fmt.Println("Resource Group result:" + string(rgAsJSON))
+	}
+	/*
+		server := createServer()
+		serverAsJSON, serr := toJSON(server)
+		if serr == nil {
+			fmt.Println("Create Server result:" + string(serverAsJSON))
+		}
+		fmt.Print("Server created. Press enter to update Server")
+		var input string
+		fmt.Scanln(&input)
+	*/
 	sslEnforcement = "Enabled"
 	updateServer()
 	fmt.Print("Server updated. Press enter to delete Server")
 	fmt.Scanln(&input)
-	deleteServer()
 
+	deleteServer()
 }
 
 // createServerGroup creates a resource group
-func createResourceGroup() resources.ResourceGroup {
+func createResourceGroup() resources.Group {
 	fmt.Println("Create resource group:" + resourceGroupName)
-	rg := resources.ResourceGroup{
+	rgParms := resources.Group{
 		Location: to.StringPtr(location),
 	}
-	_, err := groupsClient.CreateOrUpdate(resourceGroupName, rg)
-	onErrorFail(err, "CreateOrUpdate failed")
-
+	rg, err := groupsClient.CreateOrUpdate(resourceGroupName, rgParms)
+	onErrorFail(err, "CreateOrUpdate resource group failed")
 	return rg
 }
 
@@ -135,12 +149,13 @@ func createServer() resources.GenericResource {
 		},
 		Sku: sku,
 	}
-	operationResponse, err := resourcesClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, genericResource, nil)
-	onErrorFail(err, "Create failed")
-
-	bodyBytes, _ := ioutil.ReadAll(operationResponse.Body)
-	bodyString := string(bodyBytes)
-	fmt.Println(bodyString)
+	respChannel, errChannel := resourcesClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, genericResource, nil)
+	select {
+	case resp := <-respChannel:
+		genericResource = resp
+	case err := <-errChannel:
+		onErrorFail(err, "Create failed")
+	}
 	return genericResource
 }
 
@@ -148,7 +163,8 @@ func createServer() resources.GenericResource {
 // TODO:
 //    - need to find out if it's possible to just send the changed attributes
 //    - if not, check on how to read back the current set of full configuration properites
-func updateServer() {
+
+func updateServer() resources.GenericResource {
 
 	sku := &resources.Sku{
 		Name:     to.StringPtr("SkuName"),
@@ -168,15 +184,27 @@ func updateServer() {
 		},
 		Sku: sku,
 	}
-	_, err := resourcesClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, genericResource, nil)
-	onErrorFail(err, "Update failed")
+	resultChannel, errorChannel := resourcesClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, genericResource, nil)
+	err := <-errorChannel
+	if err != nil {
+		onErrorFail(err, "Update failed")
+	}
+	return <-resultChannel
 }
 
 // deleteServer deletes a generic resource
+
 func deleteServer() {
 	fmt.Println("Delete a resource")
-	_, err := resourcesClient.Delete(resourceGroupName, namespace, "", resourceType, serverName, nil)
-	onErrorFail(err, "Delete failed")
+	resultChannel, errorChannel := resourcesClient.Delete(resourceGroupName, namespace, "", resourceType, serverName, nil)
+	err := <-errorChannel
+	if err != nil {
+		onErrorFail(err, "Delete failed")
+	}
+	deleteResult, merr := toJSON(<-resultChannel)
+	if merr == nil {
+		fmt.Println("Delete result:" + deleteResult)
+	}
 }
 
 // getEnvVarOrExit returns the value of specified environment variable or terminates if it's not defined.
@@ -200,11 +228,16 @@ func onErrorFail(err error, message string) {
 	}
 }
 
-func createClients(subscriptionID string, spToken *azure.ServicePrincipalToken) {
+func createClients(subscriptionID string, authorizer *autorest.BearerAuthorizer) {
 	groupsClient = resources.NewGroupsClient(subscriptionID)
-	groupsClient.Authorizer = spToken
+	groupsClient.Authorizer = authorizer
 
-	resourcesClient = resources.NewClient(subscriptionID)
-	resourcesClient.Authorizer = spToken
-	resourcesClient.APIVersion = "2017-04-30-preview"
+	resourcesClient = resources.NewGroupClient(subscriptionID)
+	resourcesClient.Authorizer = authorizer
+	//resourcesClient.APIVersion = "2017-04-30-preview"
+}
+
+func toJSON(v interface{}) (string, error) {
+	j, err := json.MarshalIndent(v, "", "  ")
+	return string(j), err
 }
