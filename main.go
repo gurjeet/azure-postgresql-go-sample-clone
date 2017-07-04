@@ -64,7 +64,7 @@ var (
 	capacity                   int32 = 100
 
 	// PostgreSQL instance name.  Must be globally unique
-	serverName = "azcat-db7"
+	serverName = "azcat-db6"
 
 	// client to create resource groups
 	groupsClient resources.GroupsClient
@@ -91,15 +91,15 @@ func init() {
 }
 
 func main() {
-	var input string
+	//var input string
 	// ensure the resource group is created
-	fmt.Println("Creating resource group:" + resourceGroupName)
-	rg := createResourceGroup()
-	rgAsJSON, merr := toJSON(rg)
-	if merr == nil {
-		fmt.Println("Resource Group result:" + string(rgAsJSON))
-	}
 	/*
+		fmt.Println("Creating resource group:" + resourceGroupName)
+		rg := createResourceGroup()
+		rgAsJSON, merr := toJSON(rg)
+		if merr == nil {
+			fmt.Println("Resource Group result:" + string(rgAsJSON))
+		}
 		server := createServer()
 		serverAsJSON, serr := toJSON(server)
 		if serr == nil {
@@ -109,12 +109,17 @@ func main() {
 		var input string
 		fmt.Scanln(&input)
 	*/
-	sslEnforcement = "Enabled"
+	//sslEnforcement = "Enabled"
+	administratorLoginPassword = "NewPwd54321"
 	updateServer()
-	fmt.Print("Server updated. Press enter to delete Server")
-	fmt.Scanln(&input)
+	fmt.Print("Server updated")
 
-	deleteServer()
+	/*
+		fmt.Print("Server updated. Press enter to delete Server")
+		fmt.Scanln(&input)
+
+		deleteServer()
+	*/
 }
 
 // createServerGroup creates a resource group
@@ -165,25 +170,20 @@ func createServer() resources.GenericResource {
 //    - if not, check on how to read back the current set of full configuration properites
 
 func updateServer() resources.GenericResource {
-
-	sku := &resources.Sku{
-		Name:     to.StringPtr("SkuName"),
-		Tier:     to.StringPtr(tier),
-		Capacity: to.Int32Ptr(capacity),
-	}
-
+	/*
+		sku := &resources.Sku{
+			Name:     to.StringPtr("SkuName"),
+			Tier:     to.StringPtr(tier),
+			Capacity: to.Int32Ptr(capacity),
+		}
+	*/
 	genericResource := resources.GenericResource{
-		Location: to.StringPtr(location),
 		Properties: &map[string]interface{}{
-			"location":                   location,
-			"administratorLogin":         administratorLogin,
+			//"sslEnforcement": sslEnforcement,
 			"administratorLoginPassword": administratorLoginPassword,
-			"version":                    version,
-			"storageMB":                  storageMB,
-			"sslEnforcement":             sslEnforcement,
 		},
-		Sku: sku,
 	}
+	resourcesClient.UpdateUsingPatch = true
 	resultChannel, errorChannel := resourcesClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, genericResource, nil)
 	err := <-errorChannel
 	if err != nil {

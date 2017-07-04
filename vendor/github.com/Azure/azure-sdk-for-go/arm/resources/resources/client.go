@@ -36,6 +36,7 @@ type ManagementClient struct {
 	autorest.Client
 	BaseURI        string
 	SubscriptionID string
+	UpdateUsingPatch bool
 }
 
 // New creates an instance of the ManagementClient client.

@@ -242,6 +242,13 @@ func (client GroupClient) CreateOrUpdate(resourceGroupName string, resourceProvi
 	return resultChan, errChan
 }
 
+func (client GroupClient) getDecoratorForSend() autorest.PrepareDecorator {
+	if client.UpdateUsingPatch {
+		return autorest.AsPatch()
+	}
+	return autorest.AsPut()
+}
+
 // CreateOrUpdatePreparer prepares the CreateOrUpdate request.
 func (client GroupClient) CreateOrUpdatePreparer(resourceGroupName string, resourceProviderNamespace string, parentResourcePath string, resourceType string, resourceName string, parameters GenericResource, cancel <-chan struct{}) (*http.Request, error) {
 	pathParameters := map[string]interface{}{
@@ -261,7 +268,7 @@ func (client GroupClient) CreateOrUpdatePreparer(resourceGroupName string, resou
 
 	preparer := autorest.CreatePreparer(
 		autorest.AsJSON(),
-		autorest.AsPut(),
+		client.getDecoratorForSend(),
 		autorest.WithBaseURL(client.BaseURI),
 		autorest.WithPathParameters("/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{parentResourcePath}/{resourceType}/{resourceName}", pathParameters),
 		autorest.WithJSON(parameters),
