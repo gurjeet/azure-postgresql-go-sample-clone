@@ -41,6 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
@@ -60,6 +61,7 @@ var (
 )
 
 func main() {
+
 	//var input string
 	/*
 		createServer(resourceGroupName, "dar-95-50-0", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 50, 0)
@@ -79,11 +81,15 @@ func main() {
 		createFirewallRule(resourceGroupName, "dar-db2", "all-ips", "0.0.0.0", "255.255.255.255")
 	*/
 
-	// Predix storage sizes 50/100/200 GB
-
-	createServer(resourceGroupName, "dar-95-50-50", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 50, 50)
-	createServer(resourceGroupName, "dar-95-50-100", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 100)
-	createServer(resourceGroupName, "dar-95-50-200", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 200)
+	// Predix storage sizes 50/100/200 GB.
+	// Valid Azure Postgresql storage sizes range from minimum of 51200 MB and additional increments of 128000 MB up to maximum of 947200 MB
+	//
+	// default 0 -> 50 GB
+	// createServer(resourceGroupName, "dar-95-50-50", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 50, 0)
+	// 179200 MB -> 175 GB
+	// createServer(resourceGroupName, "dar-95-50-100", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 175)
+	// 307200 MB ->300 GB
+	// createServer(resourceGroupName, "dar-95-50-200", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 300)
 
 	/*
 		deleteServer(resourceGroupName, "dar-95-50-50")
@@ -94,6 +100,15 @@ func main() {
 	/*
 		updateAdministratorPassword(resourceGroupName, "serverName", "Welcome12345")
 	*/
+
+	utcNow := time.Now().UTC()
+	restorePoint := utcNow.Add(time.Minute * 5 * -1)
+
+	fmt.Printf("UTC now %v  restorePoint %v\n", utcNow, restorePoint)
+
+	restoreServer(resourceGroupName, "dar-db2", resourceGroupName, "dar-db2-restored", restorePoint)
+	os.Exit(1)
+
 }
 
 // createServerGroup creates a resource group
@@ -142,6 +157,22 @@ func createServer(
 		onErrorFail(err, "Create failed")
 	}
 	fmt.Println("Create server done")
+}
+
+// createServer creates a generic resource
+func restoreServer(
+	srcResourceGroup string,
+	srcServerName string,
+	targetResourceGroup string,
+	targetServerName string,
+	restorePoint time.Time,
+) {
+
+	err := postgresqlClient.RestoreServer(srcResourceGroup, srcServerName, targetResourceGroup, targetServerName, restorePoint)
+	if err != nil {
+		onErrorFail(err, "Restore failed")
+	}
+	fmt.Println("Restore server done")
 }
 
 // create firewall rule

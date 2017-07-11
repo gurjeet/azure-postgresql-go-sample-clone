@@ -1,6 +1,9 @@
 package postgresql
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
 	"github.com/Azure/go-autorest/autorest/to"
 )
@@ -107,6 +110,55 @@ func (serversClient ServersClient) CreateServer(resourceGroupName string, server
 		Sku:        sku,
 	}
 	_, errorChannel := groupClient.CreateOrUpdate(resourceGroupName, namespace, "", resourceType, serverName, serverResource, nil, false)
+	return <-errorChannel
+}
+
+// RestoreServer creates a new server as point in time copy of source server
+// {
+//   "createMode": "PointInTimeRestore",
+//   "sourceServerId": "/subscriptions/xxx/rg/providers/Microsoft.DBforMySQL/servers/sourceDb",
+//   "restorePointInTime": "2017-05-22T05:01:02.344444Z"},
+//   "location": "westeurope"
+// }
+func (serversClient ServersClient) RestoreServer(
+	srcResourceGroup string,
+	srcServerName string,
+	targetResourceGroup string,
+	targetServerName string,
+	restorePointInTime time.Time,
+) (err error) {
+	// get the source server
+	//resourceClient := resources.NewGroupClient(serversClient.SubscriptionID)
+	//resourceClient.Authorizer = serversClient.Authorizer
+	// use the GroupClient from the rest_operations.go
+	groupClient := NewGroupClient(serversClient.SubscriptionID)
+	groupClient.Authorizer = serversClient.Authorizer
+
+	// resourceGroupName string, resourceProviderNamespace string, parentResourcePath string, resourceType string, resourceName string
+	srcServer, resourceError := groupClient.Get(srcResourceGroup, namespace, "", resourceType, srcServerName)
+
+	if resourceError != nil {
+		fmt.Printf("Error getting source server %s", resourceError)
+		return resourceError
+	}
+	// CreateOrUpdate(resourceGroupName string, resourceProviderNamespace string, parentResourcePath string, resourceType string, resourceName string, parameters resources.GenericResource, cancel <-chan struct{}, useHTTPPatch bool) (<-chan resources.GenericResource, <-chan error)
+
+	srcServerResourceID := srcServer.ID
+	fmt.Printf("srcServer ResourceId %s", *srcServerResourceID)
+
+	// create the properties
+	properties := map[string]interface{}{
+		"sourceServerId":     srcServer.ID,
+		"location":           srcServer.Location,
+		"createMode":         CreateModePointInTimeRestore,
+		"restorePointInTime": restorePointInTime,
+	}
+	// create the resource
+	serverResource := resources.GenericResource{
+		Location:   srcServer.Location,
+		Properties: &properties,
+	}
+	_, errorChannel := groupClient.CreateOrUpdate(targetResourceGroup, namespace, "", resourceType, targetServerName, serverResource, nil, false)
 	return <-errorChannel
 }
 
