@@ -8,6 +8,7 @@ Initial sample of API access to Azure PostgreSQL service.  This is not productio
 - Point-in-time-recovery
 
 # Other notes
+- main.go provides the example
 - Credentials are provided through environment variables.
 - The swagger for postgresql is available at: https://github.com/Azure/azure-rest-api-specs/tree/current/specification/postgresql
 - This update includes the go SDK with initial (beta) support for postgresql service: https://github.com/Azure/azure-sdk-for-go/releases/tag/v10.2.1-beta
