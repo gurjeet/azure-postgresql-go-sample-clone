@@ -19,11 +19,10 @@ package resources
 // regenerated.
 
 import (
-	"net/http"
-
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/validation"
+	"net/http"
 )
 
 // GroupClient is the provides operations for working with resources and
@@ -253,8 +252,7 @@ func (client GroupClient) CreateOrUpdatePreparer(resourceGroupName string, resou
 		"subscriptionId":            autorest.Encode("path", client.SubscriptionID),
 	}
 
-	//const APIVersion = "2016-09-01"
-	const APIVersion = "2017-04-30-preview"
+	const APIVersion = "2016-09-01"
 	queryParameters := map[string]interface{}{
 		"api-version": APIVersion,
 	}
@@ -448,8 +446,7 @@ func (client GroupClient) DeletePreparer(resourceGroupName string, resourceProvi
 		"subscriptionId":            autorest.Encode("path", client.SubscriptionID),
 	}
 
-	const APIVersion = "2017-04-30-preview"
-	//const APIVersion = "2016-09-01"
+	const APIVersion = "2016-09-01"
 	queryParameters := map[string]interface{}{
 		"api-version": APIVersion,
 	}

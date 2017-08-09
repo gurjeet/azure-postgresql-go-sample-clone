@@ -1,11 +1,13 @@
 package: azure-postgresql-go-sample
 import:
 - package: github.com/Azure/azure-sdk-for-go
-  version: v10.1.0-beta
+  version: v10.2.1-beta
   subpackages:
   - arm/resources/resources
+  - arm/postgresql
 - package: github.com/Azure/go-autorest
-  version: ~8.1.0
+  version: ~8.1.1
   subpackages:
   - autorest/azure
   - autorest/to
+  - autorest/date

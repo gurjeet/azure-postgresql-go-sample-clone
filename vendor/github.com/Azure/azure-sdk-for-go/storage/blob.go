@@ -174,11 +174,17 @@ type BlobRange struct {
 }
 
 func (br BlobRange) String() string {
+	if br.End == 0 {
+		return fmt.Sprintf("bytes=%d-", br.Start)
+	}
 	return fmt.Sprintf("bytes=%d-%d", br.Start, br.End)
 }
 
 // Get returns a stream to read the blob. Caller must call both Read and Close()
 // to correctly close the underlying connection.
+//
+// See the GetRange method for use with a Range header.
+//
 // See https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/Get-Blob
 func (b *Blob) Get(options *GetBlobOptions) (io.ReadCloser, error) {
 	rangeOptions := GetBlobRangeOptions{
@@ -227,7 +233,9 @@ func (b *Blob) getRange(options *GetBlobRangeOptions) (*storageResponse, error) 
 	if options != nil {
 		if options.Range != nil {
 			headers["Range"] = options.Range.String()
-			headers["x-ms-range-get-content-md5"] = fmt.Sprintf("%v", options.GetRangeContentMD5)
+			if options.GetRangeContentMD5 {
+				headers["x-ms-range-get-content-md5"] = "true"
+			}
 		}
 		if options.GetBlobOptions != nil {
 			headers = mergeHeaders(headers, headersFromStruct(*options.GetBlobOptions))

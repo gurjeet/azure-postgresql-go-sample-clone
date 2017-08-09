@@ -14,10 +14,6 @@ package main
 // limitations under the License.
 //--------------------------------------------------------------------------
 
-// Example of using resources.GenericResource from the Azure SDK for Go
-// https://github.com/Azure/azure-sdk-for-go
-//
-// based on samples here: https://github.com/Azure-Samples/resource-manager-go-resources-and-groups
 //
 // Notes:
 // - in preview most properties can not be changed and only Basic SKU can be used
@@ -26,27 +22,20 @@ package main
 // - service instance parameters are hard coded as vars
 // - credentials are read from environment
 //
-// Open Questions for PG:
-// - Is is better to use template? https://gallery.azure.com/artifact/20161101/Microsoft.PostgreSQLServer.1.0.18/DeploymentTemplates/NewPostgreSqlServer.json
-// - Udpate resource looks like all initial parms are needed.  Is there ability to just sent the changed values
-// - If there's a failure during deploy, it looks like the entire resource group is removed
-//
-// Open Questions for Predix:
-//   Does current implementation use polling?
-//   golang version?
-//   how does naming work today (PostgreSQL instance is a global name)
-//
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/arm/postgresql"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/dave-read/azure-postgresql-go-sample/postgresql"
+	"github.com/Azure/go-autorest/autorest/date"
+	"github.com/Azure/go-autorest/autorest/to"
 )
 
 var (
@@ -56,75 +45,46 @@ var (
 	administratorLogin         = "azadmin"
 	administratorLoginPassword = "Welcome1234"
 
-	// postgresql client
-	postgresqlClient postgresql.ServersClient
+	// resource clients
+	serversClient       postgresql.ServersClient
+	firewallRulesClient postgresql.FirewallRulesClient
 )
 
 func main() {
 
-	//var input string
-	/*
-		createServer(resourceGroupName, "dar-95-50-0", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 50, 0)
-		createServer(resourceGroupName, "dar-95-100-0", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 0)
-		createServer(resourceGroupName, "dar-96-50-0", location, administratorLogin, administratorLoginPassword, "9.6", postgresql.SkuTierBasic, 50, 0)
-		createServer(resourceGroupName, "dar-96-100-0", location, administratorLogin, administratorLoginPassword, "9.6", postgresql.SkuTierBasic, 100, 0)
-	*/
-
-	/*
-		deleteServer(resourceGroupName, "dar-95-50-0")
-		deleteServer(resourceGroupName, "dar-95-100-0")
-		deleteServer(resourceGroupName, "dar-96-50-0")
-		deleteServer(resourceGroupName, "dar-96-100-0")
-	*/
-
-	/*
-		createFirewallRule(resourceGroupName, "dar-db2", "all-ips", "0.0.0.0", "255.255.255.255")
-	*/
-
-	// Predix storage sizes 50/100/200 GB.
-	// Valid Azure Postgresql storage sizes range from minimum of 51200 MB and additional increments of 128000 MB up to maximum of 947200 MB
-	//
+	// storage sizes
 	// default 0 -> 50 GB
-	// createServer(resourceGroupName, "dar-95-50-50", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 50, 0)
 	// 179200 MB -> 175 GB
-	// createServer(resourceGroupName, "dar-95-50-100", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 175)
 	// 307200 MB ->300 GB
-	// createServer(resourceGroupName, "dar-95-50-200", location, administratorLogin, administratorLoginPassword, "9.5", postgresql.SkuTierBasic, 100, 300)
 
-	/*
-		deleteServer(resourceGroupName, "dar-95-50-50")
-		deleteServer(resourceGroupName, "dar-95-50-100")
-		deleteServer(resourceGroupName, "dar-95-50-200")
-	*/
+	createServer(resourceGroupName, "dar-95-50-175", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopFive, postgresql.Basic, 50, 179200)
+	createFirewallRule(resourceGroupName, "dar-95-50-175", "all", "0.0.0.0", "255.255.255.255")
 
-	/*
-		updateAdministratorPassword(resourceGroupName, "serverName", "Welcome12345")
-	*/
+	createServer(resourceGroupName, "dar-96-100-300", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopSix, postgresql.Basic, 100, 307200)
+	createFirewallRule(resourceGroupName, "dar-96-100-300", "myip", "0.0.0.0", "255.255.255.255")
+
+	wait("check logins ... then press Enter")
+	updateAdministratorPassword(resourceGroupName, "dar-95-50-175", "Welcome0000")
+	updateAdministratorPassword(resourceGroupName, "dar-96-100-300", "Welcome0000")
+	wait("check logins with new passwords ... then press Enter")
+
+	wait("creating backup ... press Enter to start")
 
 	utcNow := time.Now().UTC()
 	restorePoint := utcNow.Add(time.Minute * 5 * -1)
-
 	fmt.Printf("UTC now %v  restorePoint %v\n", utcNow, restorePoint)
 
-	restoreServer(resourceGroupName, "dar-db2", resourceGroupName, "dar-db2-restored", restorePoint)
-	os.Exit(1)
+	restoreServer(resourceGroupName, "dar-95-50-175", resourceGroupName, "dar-95-50-175-restored", restorePoint)
+	wait("check backup server ... then Enter to delete servers")
 
+	deleteServer(resourceGroupName, "dar-95-50-175")
+	deleteServer(resourceGroupName, "dar-95-50-175-restored")
+	deleteServer(resourceGroupName, "dar-96-100-300")
+
+	fmt.Println("Done")
 }
 
-// createServerGroup creates a resource group
-/*
-func createResourceGroup() resources.Group {
-	fmt.Println("Create resource group:" + resourceGroupName)
-	rgParms := resources.Group{
-		Location: to.StringPtr(location),
-	}
-	rg, err := groupsClient.CreateOrUpdate(resourceGroupName, rgParms)
-	onErrorFail(err, "CreateOrUpdate resource group failed")
-	return rg
-}
-*/
-
-// createServer creates a generic resource
+// createServer creates a server
 func createServer(
 	resourceGroup string,
 	serverName string,
@@ -134,32 +94,65 @@ func createServer(
 	serverVersion postgresql.ServerVersion,
 	serverTier postgresql.SkuTier,
 	computeUnits int32, //optional
-	storageMB int32, // optional
+	storageMB int64, // optional
 ) {
 
-	serverProperties := postgresql.ServerProperties{
-		Location:                   location,
-		AdministratorLogin:         administratorLogin,
-		AdministratorLoginPassword: administratorLoginPassword,
+	fmt.Println("Creating server:" + resourceGroupName + "/" + serverName)
+	spfdc := postgresql.ServerPropertiesForDefaultCreate{
+		AdministratorLogin:         to.StringPtr(administratorLogin),
+		AdministratorLoginPassword: to.StringPtr(administratorLoginPassword),
+		SslEnforcement:             postgresql.SslEnforcementEnumEnabled,
+		CreateMode:                 postgresql.CreateModeDefault,
 		Version:                    serverVersion,
-		Tier:                       serverTier,
+		StorageMB:                  to.Int64Ptr(storageMB),
 	}
 
-	if computeUnits > 0 {
-		serverProperties.ComputeUnits = computeUnits
-	}
-	if storageMB > 0 {
-		serverProperties.StorageMB = storageMB
+	properties, _ := spfdc.AsServerPropertiesForDefaultCreate()
+	serverForCreate := postgresql.ServerForCreate{
+
+		Location:   to.StringPtr(location),
+		Properties: properties,
+		Sku: &postgresql.Sku{
+			Name:     to.StringPtr("SkuName"),
+			Tier:     postgresql.Basic,
+			Capacity: to.Int32Ptr(computeUnits),
+		},
+		Tags: &map[string]*string{
+			"Tag1": to.StringPtr("1"),
+		},
 	}
 
-	err := postgresqlClient.CreateServer(resourceGroupName, serverName, serverProperties)
+	serverChannel, errChannel := serversClient.CreateOrUpdate(resourceGroupName, serverName, serverForCreate, nil)
+	err := <-errChannel
 	if err != nil {
 		onErrorFail(err, "Create failed")
 	}
-	fmt.Println("Create server done")
+	server := <-serverChannel
+
+	fmt.Printf("Create server done. Response type: %s \n", toJSON(server))
 }
 
-// createServer creates a generic resource
+// restore creates server from point-in-time state of source server
+/*
+ {
+  "id": "/subscriptions/31f97be2-2566-44f2-bb14-14d6924c8caa/resourceGroups/postgresql_from_go/providers/Microsoft.DBforPostgreSQL/servers/dr-pwd-change",
+  "name": "dr-pwd-change",
+  "type": "Microsoft.DBforPostgreSQL/servers",
+  "location": "westus",
+  "sku": {
+    "name": "PGSQLB100",
+    "tier": "Basic",
+    "capacity": 100
+  },
+  "properties": {
+    "administratorLogin": "azadmin",
+    "storageMB": 51200,
+    "version": "9.6",
+    "sslEnforcement": "Enabled",
+    "userVisibleState": "Ready",
+    "fullyQualifiedDomainName": "dr-pwd-change.postgres.database.azure.com"
+  }
+*/
 func restoreServer(
 	srcResourceGroup string,
 	srcServerName string,
@@ -167,12 +160,36 @@ func restoreServer(
 	targetServerName string,
 	restorePoint time.Time,
 ) {
+	fmt.Printf("Restore server source %s/%s target %s/%s point-in-time %s\n", srcResourceGroup, srcServerName, targetResourceGroup, targetServerName, restorePoint.String())
+	srcServer, getServerErr := serversClient.Get(srcResourceGroup, srcServerName)
+	if getServerErr != nil {
+		onErrorFail(getServerErr, "Get source server details failed")
+	}
 
-	err := postgresqlClient.RestoreServer(srcResourceGroup, srcServerName, targetResourceGroup, targetServerName, restorePoint)
+	srcServerResourceID := srcServer.ID
+	fmt.Printf("srcServer %s\n", toJSON(srcServer))
+	fmt.Printf("srcServer ResourceId %s\n", *srcServerResourceID)
+
+	spfr := postgresql.ServerPropertiesForRestore{
+		CreateMode:         postgresql.CreateModePointInTimeRestore,
+		SourceServerID:     srcServerResourceID,
+		RestorePointInTime: &date.Time{Time: restorePoint},
+	}
+
+	properties, _ := spfr.AsServerPropertiesForRestore()
+	serverForCreate := postgresql.ServerForCreate{
+		Location:   srcServer.Location,
+		Properties: properties,
+	}
+
+	fmt.Printf("Calling CreateOrUpdate %s\n", toJSON(serverForCreate))
+	serverChannel, errChannel := serversClient.CreateOrUpdate(targetResourceGroup, targetServerName, serverForCreate, nil)
+	err := <-errChannel
 	if err != nil {
 		onErrorFail(err, "Restore failed")
 	}
-	fmt.Println("Restore server done")
+	server := <-serverChannel
+	fmt.Printf("Restore server done. Response type: %s \n", toJSON(server))
 }
 
 // create firewall rule
@@ -184,31 +201,56 @@ func createFirewallRule(
 	endIPAddress string,
 ) {
 
-	err := postgresqlClient.CreateFirewallRule(resourceGroup, serverName, firewallRuleName, startIPAddress, endIPAddress)
-	//CreateFirewallRule(resourceGroupName string, serverName string, ruleName string, startIP string, endIP string) (err error)
+	firewallRuleProperties := postgresql.FirewallRuleProperties{
+		StartIPAddress: to.StringPtr(startIPAddress),
+		EndIPAddress:   to.StringPtr(endIPAddress),
+	}
+
+	firewallRule := postgresql.FirewallRule{
+		Name: to.StringPtr(firewallRuleName),
+	}
+
+	firewallRule.FirewallRuleProperties = &firewallRuleProperties
+	fmt.Printf("Creating firewall %s/%s %s [%s][%s]\n", resourceGroup, serverName, firewallRuleName, startIPAddress, endIPAddress)
+	_, errChannel := firewallRulesClient.CreateOrUpdate(resourceGroup, serverName, firewallRuleName, firewallRule, nil)
+	err := <-errChannel
 	if err != nil {
 		onErrorFail(err, "firewall create failed")
 	}
-	fmt.Println("Create firewall done")
+	fmt.Println("Creating firewall rule done")
 }
 
 // deleteServer deletes a server
 func deleteServer(resourceGroupName string, serverName string) {
 	fmt.Println("Delete server:" + resourceGroupName + "/" + serverName)
-	err := postgresqlClient.DeleteServer(resourceGroupName, serverName)
+	responseChannel, errChannel := serversClient.Delete(resourceGroupName, serverName, nil)
+	err := <-errChannel
 	if err != nil {
 		onErrorFail(err, "Delete failed")
 	}
-	fmt.Println("Delete server done")
+	response := <-responseChannel
+	fmt.Printf("Delete server done.  Response: %s \n", toJSON(response))
+
 }
 
 func updateAdministratorPassword(resourceGroupName string, serverName string, newPassword string) {
 	fmt.Println("changing password:" + resourceGroupName + "/" + serverName)
-	err := postgresqlClient.ChangeAdministratorPassword(resourceGroupName, serverName, newPassword)
-	if err != nil {
-		onErrorFail(err, "changing password failed")
+
+	serverUpdateParametersProperties := postgresql.ServerUpdateParametersProperties{
+		AdministratorLoginPassword: to.StringPtr(newPassword),
 	}
-	fmt.Println("password change done")
+
+	serverUpdateParameters := postgresql.ServerUpdateParameters{}
+	serverUpdateParameters.ServerUpdateParametersProperties = &serverUpdateParametersProperties
+
+	serverChannel, errChannel := serversClient.Update(resourceGroupName, serverName, serverUpdateParameters, nil)
+	err := <-errChannel
+	if err != nil {
+		onErrorFail(err, "Create failed")
+	}
+	server := <-serverChannel
+	fmt.Printf("Parameter update done. Response: %s \n", toJSON(server))
+
 }
 
 // getEnvVarOrExit returns the value of specified environment variable or terminates if it's not defined.
@@ -232,13 +274,23 @@ func onErrorFail(err error, message string) {
 }
 
 func createClients(subscriptionID string, authorizer *autorest.BearerAuthorizer) {
-	postgresqlClient = postgresql.NewServersClient(subscriptionID)
-	postgresqlClient.Authorizer = authorizer
+	serversClient = postgresql.NewServersClient(subscriptionID)
+	serversClient.Authorizer = authorizer
+	firewallRulesClient = postgresql.FirewallRulesClient(serversClient)
 }
 
-func toJSON(v interface{}) (string, error) {
+func toJSON(v interface{}) string {
 	j, err := json.MarshalIndent(v, "", "  ")
-	return string(j), err
+	if err != nil {
+		return "ERROR:" + err.Error()
+	}
+	return string(j)
+}
+
+func wait(prompt string) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print(prompt)
+	reader.ReadString('\n')
 }
 
 // Create the clients
