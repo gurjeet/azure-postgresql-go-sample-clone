@@ -40,10 +40,13 @@ import (
 
 var (
 	// Hard coded values for instance creation/update
-	resourceGroupName          = "postgresql_from_go"
+	resourceGroupName          = "gurjeet-test"
 	location                   = "westus"
 	administratorLogin         = "azadmin"
 	administratorLoginPassword = "Welcome1234"
+
+	db1name = "gurjeet-test-3"
+	db2name = "gurjeet-test-4"
 
 	// resource clients
 	serversClient       postgresql.ServersClient
@@ -57,15 +60,15 @@ func main() {
 	// 179200 MB -> 175 GB
 	// 307200 MB ->300 GB
 
-	createServer(resourceGroupName, "dar-95-50-175", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopFive, postgresql.Basic, 50, 179200)
-	createFirewallRule(resourceGroupName, "dar-95-50-175", "all", "0.0.0.0", "255.255.255.255")
+	createServer(resourceGroupName, db1name, location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopFive, postgresql.Basic, 50, 179200)
+	createFirewallRule(resourceGroupName, db1name, "all", "0.0.0.0", "255.255.255.255")
 
-	createServer(resourceGroupName, "dar-96-100-300", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopSix, postgresql.Basic, 100, 307200)
-	createFirewallRule(resourceGroupName, "dar-96-100-300", "myip", "0.0.0.0", "255.255.255.255")
+	createServer(resourceGroupName, db2name, location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopSix, postgresql.Basic, 100, 307200)
+	createFirewallRule(resourceGroupName, db2name, "myip", "0.0.0.0", "255.255.255.255")
 
 	wait("check logins ... then press Enter")
-	updateAdministratorPassword(resourceGroupName, "dar-95-50-175", "Welcome0000")
-	updateAdministratorPassword(resourceGroupName, "dar-96-100-300", "Welcome0000")
+	updateAdministratorPassword(resourceGroupName, db1name, "Welcome0000")
+	updateAdministratorPassword(resourceGroupName, db2name, "Welcome0000")
 	wait("check logins with new passwords ... then press Enter")
 
 	wait("creating backup ... press Enter to start")
@@ -74,12 +77,12 @@ func main() {
 	restorePoint := utcNow.Add(time.Minute * 5 * -1)
 	fmt.Printf("UTC now %v  restorePoint %v\n", utcNow, restorePoint)
 
-	restoreServer(resourceGroupName, "dar-95-50-175", resourceGroupName, "dar-95-50-175-restored", restorePoint)
+	restoreServer(resourceGroupName, db1name, resourceGroupName, db1name + "-restored", restorePoint)
 	wait("check backup server ... then Enter to delete servers")
 
-	deleteServer(resourceGroupName, "dar-95-50-175")
-	deleteServer(resourceGroupName, "dar-95-50-175-restored")
-	deleteServer(resourceGroupName, "dar-96-100-300")
+	deleteServer(resourceGroupName, db1name)
+	deleteServer(resourceGroupName, db1name + "-restored")
+	deleteServer(resourceGroupName, db2name)
 
 	fmt.Println("Done")
 }
