@@ -18,10 +18,11 @@ package postgresql
 // Changes may cause incorrect behavior and will be lost if the code is regenerated.
 
 import (
+	"net/http"
+
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/validation"
-	"net/http"
 )
 
 // ServersClient is the the Microsoft Azure management API provides create, read, update, and delete functionality for
@@ -47,8 +48,10 @@ func NewServersClientWithBaseURI(baseURI string, subscriptionID string) ServersC
 // resourceGroupName is the name of the resource group that contains the resource. You can obtain this value from the
 // Azure Resource Manager API or the portal. serverName is the name of the server. parameters is the required
 // parameters for creating or updating a server.
-func (client ServersClient) CreateOrUpdate(resourceGroupName string, serverName string, parameters ServerForCreate, cancel <-chan struct{}) (<-chan Server, <-chan error) {
-	resultChan := make(chan Server, 1)
+//func (client ServersClient) CreateOrUpdate(resourceGroupName string, serverName string, parameters ServerForCreate, cancel <-chan struct{}) (<-chan Server, <-chan error) {
+//	resultChan := make(chan Server, 1)
+func (client ServersClient) CreateOrUpdate(resourceGroupName string, serverName string, parameters ServerForCreate, cancel <-chan struct{}) (<-chan autorest.Response, <-chan error) {
+	resultChan := make(chan autorest.Response, 1)
 	errChan := make(chan error, 1)
 	if err := validation.Validate([]validation.Validation{
 		{TargetValue: parameters,
@@ -69,7 +72,8 @@ func (client ServersClient) CreateOrUpdate(resourceGroupName string, serverName 
 
 	go func() {
 		var err error
-		var result Server
+		//var result Server
+		var result autorest.Response
 		defer func() {
 			if err != nil {
 				errChan <- err
@@ -86,7 +90,7 @@ func (client ServersClient) CreateOrUpdate(resourceGroupName string, serverName 
 
 		resp, err := client.CreateOrUpdateSender(req)
 		if err != nil {
-			result.Response = autorest.Response{Response: resp}
+			result.Response = resp // autorest.Response{Response: resp}
 			err = autorest.NewErrorWithError(err, "postgresql.ServersClient", "CreateOrUpdate", resp, "Failure sending request")
 			return
 		}
@@ -125,21 +129,26 @@ func (client ServersClient) CreateOrUpdatePreparer(resourceGroupName string, ser
 // CreateOrUpdateSender sends the CreateOrUpdate request. The method will close the
 // http.Response Body if it receives an error.
 func (client ServersClient) CreateOrUpdateSender(req *http.Request) (*http.Response, error) {
-	return autorest.SendWithSender(client,
-		req,
-		azure.DoPollForAsynchronous(client.PollingDelay))
+	//return autorest.SendWithSender(client,
+	//req,
+	//azure.DoPollForAsynchronous(client.PollingDelay))
+	//
+	//make async
+	return autorest.SendWithSender(client, req)
 }
 
 // CreateOrUpdateResponder handles the response to the CreateOrUpdate request. The method always
 // closes the http.Response Body.
-func (client ServersClient) CreateOrUpdateResponder(resp *http.Response) (result Server, err error) {
+func (client ServersClient) CreateOrUpdateResponder(resp *http.Response) ( /* result Server */ result autorest.Response, err error) {
 	err = autorest.Respond(
 		resp,
 		client.ByInspecting(),
 		azure.WithErrorUnlessStatusCode(http.StatusOK, http.StatusCreated, http.StatusAccepted),
-		autorest.ByUnmarshallingJSON(&result),
+		//make async, so just return http response or error
+		//autorest.ByUnmarshallingJSON(&result),
 		autorest.ByClosing())
-	result.Response = autorest.Response{Response: resp}
+	//result.Response = autorest.Response{Response: resp}
+	result.Response = resp
 	return
 }
 
