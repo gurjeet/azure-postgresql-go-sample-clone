@@ -27,6 +27,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -50,18 +51,59 @@ var (
 	firewallRulesClient postgresql.FirewallRulesClient
 )
 
+const (
+	headerAsyncOperation = "Azure-AsyncOperation"
+	dateFormat           = "20060102150405"
+	inProgress           = "InProgress"
+)
+
+type pollingStatus struct {
+	Name           string             `json:"name,omitempty"`
+	Status         string             `json:"status,omitempty"`
+	StartTime      date.Time          `json:"startTime,omitempty"`
+	OperationError azure.ServiceError `json:"error"`
+}
+
 func main() {
 
 	// storage sizes
 	// default 0 -> 50 GB
 	// 179200 MB -> 175 GB
 	// 307200 MB ->300 GB
+	var serverName = "async-test-" + time.Now().UTC().Format(dateFormat)
+	pollingURL, createServerErr := createServer(resourceGroupName, serverName, location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopFive, postgresql.Basic, 50, 179200)
+	if createServerErr != nil {
+		onErrorFail(createServerErr, "Error creating server")
+	}
+	fmt.Printf("polling url is:%s\n", pollingURL)
+	pollingCount := 0
+	pollingResult := "Polling tries exceeded"
+	for pollingCount <= 30 {
+		pollingCount++
+		// call to get current status of operation
+		pollingStatus, err := getPollingStatus(pollingURL)
+		onErrorFail(err, "Error getting polling status")
+		fmt.Println("")
+		fmt.Printf("poll count\t:%v\npollingStatus\t:%v\n", pollingCount, pollingStatus.Status)
+		fmt.Println(toJSON(pollingStatus))
+		fmt.Println("")
+		if pollingStatus.Status != inProgress {
+			pollingResult = pollingStatus.Status
+			if pollingStatus.OperationError.Code != "" {
+				fmt.Printf("[Error code:%v][Error message:%v]\n", pollingStatus.OperationError.Code, pollingStatus.OperationError.Message)
+			}
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	fmt.Println()
+	fmt.Printf("Polling complete with [status:%s][pollingCount:%v]\n", pollingResult, pollingCount)
+	os.Exit(0)
 
-	createServer(resourceGroupName, "dar-95-50-175", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopFive, postgresql.Basic, 50, 179200)
-	createFirewallRule(resourceGroupName, "dar-95-50-175", "all", "0.0.0.0", "255.255.255.255")
+	//createFirewallRule(resourceGroupName, "dar-95-50-175", "all", "0.0.0.0", "255.255.255.255")
 
-	createServer(resourceGroupName, "dar-96-100-300", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopSix, postgresql.Basic, 100, 307200)
-	createFirewallRule(resourceGroupName, "dar-96-100-300", "myip", "0.0.0.0", "255.255.255.255")
+	//createServer(resourceGroupName, "dar-96-100-300", location, administratorLogin, administratorLoginPassword, postgresql.NineFullStopSix, postgresql.Basic, 100, 307200)
+	//createFirewallRule(resourceGroupName, "dar-96-100-300", "myip", "0.0.0.0", "255.255.255.255")
 
 	wait("check logins ... then press Enter")
 	updateAdministratorPassword(resourceGroupName, "dar-95-50-175", "Welcome0000")
@@ -95,7 +137,7 @@ func createServer(
 	serverTier postgresql.SkuTier,
 	computeUnits int32, //optional
 	storageMB int64, // optional
-) {
+) (string, error) {
 
 	fmt.Println("Creating server:" + resourceGroupName + "/" + serverName)
 	spfdc := postgresql.ServerPropertiesForDefaultCreate{
@@ -122,14 +164,17 @@ func createServer(
 		},
 	}
 
-	serverChannel, errChannel := serversClient.CreateOrUpdate(resourceGroupName, serverName, serverForCreate, nil)
+	responseChannel, errChannel := serversClient.CreateOrUpdate(resourceGroupName, serverName, serverForCreate, nil)
 	err := <-errChannel
 	if err != nil {
-		onErrorFail(err, "Create failed")
+		return "", err
 	}
-	server := <-serverChannel
-
-	fmt.Printf("Create server done. Response type: %s \n", toJSON(server))
+	response := <-responseChannel
+	if response.StatusCode != http.StatusAccepted {
+		return "", fmt.Errorf("Expected HTTP status code %v but got status code:%v status:%s", http.StatusAccepted, response.StatusCode, response.Status)
+	}
+	asyncPollingURL := getAsyncPollingURL(response.Response)
+	return asyncPollingURL, nil
 }
 
 // restore creates server from point-in-time state of source server
@@ -309,4 +354,30 @@ func init() {
 	onErrorFail(err, "NewServicePrincipalToken failed")
 
 	createClients(subscriptionID, authorizer)
+}
+
+func getAsyncPollingURL(resp *http.Response) string {
+	return resp.Header.Get(http.CanonicalHeaderKey(headerAsyncOperation))
+}
+
+func getPollingStatus(url string) (*pollingStatus, error) {
+
+	req, _ := autorest.Prepare(&http.Request{},
+		autorest.AsGet(),
+		autorest.WithBaseURL(url))
+
+	resp, err := autorest.SendWithSender(serversClient, req)
+	if err != nil {
+		return nil, err
+	}
+
+	status := pollingStatus{}
+
+	defer resp.Body.Close()
+	dec := json.NewDecoder(resp.Body)
+	err = dec.Decode(&status)
+	if err != nil {
+		return nil, err
+	}
+	return &status, err
 }
